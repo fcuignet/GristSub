@@ -1,0 +1,691 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <title>Fiche association et subventions</title>
+  <style>
+    :root{
+      --bg:#f4f7fb;
+      --card:#ffffff;
+      --text:#1f2937;
+      --muted:#6b7280;
+      --line:#dbe3ea;
+      --accent:#2563eb;
+      --accent-soft:#eff6ff;
+      --ok:#065f46;
+      --ok-bg:#ecfdf5;
+      --warn:#92400e;
+      --warn-bg:#fffbeb;
+      --err:#991b1b;
+      --err-bg:#fef2f2;
+      --shadow:0 8px 24px rgba(15,23,42,.06);
+      --radius:14px;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      background:var(--bg);
+      color:var(--text);
+    }
+    .app{padding:14px;display:grid;gap:12px}
+    .card{
+      background:var(--card);
+      border:1px solid var(--line);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      overflow:hidden;
+    }
+    .section{padding:14px 16px}
+    .section + .section{border-top:1px solid var(--line)}
+    .toolbar{
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+      align-items:center;
+    }
+    select{
+      padding:8px 10px;
+      border:1px solid var(--line);
+      border-radius:10px;
+      background:#fff;
+      font:inherit;
+    }
+    .status{
+      padding:10px 12px;
+      border-radius:10px;
+      font-size:13px;
+      border:1px solid transparent;
+      margin-top:10px;
+    }
+    .status.ok{background:var(--ok-bg); color:var(--ok); border-color:#a7f3d0}
+    .status.warn{background:var(--warn-bg); color:var(--warn); border-color:#fde68a}
+    .status.err{background:var(--err-bg); color:var(--err); border-color:#fecaca}
+    .small{color:var(--muted);font-size:12px}
+    .hero{
+      display:grid;
+      gap:10px;
+      background:linear-gradient(135deg,#ffffff 0%, #f8fbff 100%);
+    }
+    .title{
+      font-size:24px;
+      font-weight:700;
+      line-height:1.2;
+      margin:0;
+    }
+    .subtitle{
+      color:var(--muted);
+      font-size:13px;
+      margin:0;
+      white-space:pre-wrap;
+    }
+    .badges{
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+    }
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      padding:6px 10px;
+      border-radius:999px;
+      background:var(--accent-soft);
+      color:#1d4ed8;
+      font-size:12px;
+      font-weight:600;
+      border:1px solid #bfdbfe;
+    }
+    .grid{display:grid;gap:12px}
+    .grid.cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .grid.cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+    .grid.cols-4{grid-template-columns:repeat(4,minmax(0,1fr))}
+    @media (max-width: 1000px){
+      .grid.cols-2,.grid.cols-3,.grid.cols-4{grid-template-columns:1fr}
+    }
+    h2{
+      margin:0 0 10px 0;
+      font-size:15px;
+      font-weight:700;
+    }
+    .row{
+      display:grid;
+      grid-template-columns:180px 1fr;
+      gap:10px;
+      align-items:start;
+      padding:6px 0;
+      border-bottom:1px dashed #edf2f7;
+    }
+    .row:last-child{border-bottom:none}
+    .k{
+      color:var(--muted);
+      font-size:12px;
+      font-weight:600;
+      text-transform:uppercase;
+      letter-spacing:.03em;
+    }
+    .v{
+      font-size:14px;
+      white-space:pre-wrap;
+      word-break:break-word;
+    }
+    .empty{color:var(--muted);font-style:italic}
+    .stat{
+      border:1px solid var(--line);
+      border-radius:12px;
+      padding:12px;
+      background:#fafcff;
+    }
+    .stat .n{
+      font-size:20px;
+      font-weight:700;
+      margin-bottom:4px;
+    }
+    .stat .l{
+      font-size:12px;
+      color:var(--muted);
+    }
+    .entry{
+      border:1px solid var(--line);
+      border-radius:12px;
+      padding:12px;
+      background:#fbfdff;
+    }
+    .entry-head{
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-start;
+      gap:10px;
+      margin-bottom:8px;
+    }
+    .entry-title{
+      font-size:14px;
+      font-weight:700;
+      line-height:1.3;
+    }
+    .entry-amount{
+      font-size:14px;
+      font-weight:700;
+      color:#1d4ed8;
+      white-space:nowrap;
+    }
+    details{
+      border:1px solid var(--line);
+      border-radius:10px;
+      background:#fbfcfe;
+      overflow:hidden;
+    }
+    summary{
+      cursor:pointer;
+      padding:10px 12px;
+      font-weight:600;
+      font-size:13px;
+      background:#f8fafc;
+    }
+    pre{
+      margin:0;
+      padding:12px;
+      overflow:auto;
+      background:#0f172a;
+      color:#e5e7eb;
+      font-size:12px;
+      line-height:1.45;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="card">
+      <div class="section">
+        <div class="toolbar">
+          <label>
+            <span class="small">Colonne JSON association</span><br />
+            <select id="assocCol"></select>
+          </label>
+          <label>
+            <span class="small">Colonne JSON subventions</span><br />
+            <select id="grantsCol"></select>
+          </label>
+        </div>
+        <div id="status" class="status warn">Sélectionne une ligne dans la table source.</div>
+      </div>
+    </div>
+
+    <div id="content"></div>
+  </div>
+
+<script>
+const state = {
+  record: null,
+  sourceColumns: [],
+  assocCol: "ds_assos_json",
+  grantsCol: "ds_assos_grants",
+  assoc: null,
+  grants: null,
+  lastRenderTs: null,
+};
+
+const els = {
+  assocCol: document.getElementById("assocCol"),
+  grantsCol: document.getElementById("grantsCol"),
+  status: document.getElementById("status"),
+  content: document.getElementById("content"),
+};
+
+function setStatus(message, kind="warn"){
+  els.status.className = `status ${kind}`;
+  els.status.textContent = message;
+}
+
+function safeParse(v){
+  if (v == null || v === "") return null;
+  if (typeof v === "object") return v;
+  try { return JSON.parse(v); } catch { return null; }
+}
+
+function populateSelect(el, values, selected){
+  el.innerHTML = "";
+  for (const v of values) {
+    const o = document.createElement("option");
+    o.value = v;
+    o.textContent = v;
+    el.appendChild(o);
+  }
+  if (values.includes(selected)) el.value = selected;
+}
+
+function esc(s){
+  return String(s ?? "")
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;");
+}
+
+function fmtDate(value){
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleDateString("fr-FR");
+}
+
+function fmtDateTime(value){
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleString("fr-FR");
+}
+
+function formatCurrency(n){
+  if (n === null || n === undefined || n === "") return "";
+  const num = Number(n);
+  if (Number.isNaN(num)) return String(n);
+  return new Intl.NumberFormat("fr-FR", {style:"currency", currency:"EUR"}).format(num);
+}
+
+function firstNonEmpty(...values){
+  for (const v of values){
+    if (v !== null && v !== undefined && String(v).trim() !== "") return v;
+  }
+  return "";
+}
+
+function joinParts(parts){
+  return parts.filter(Boolean).join(" ");
+}
+
+function valueOf(node, fallback=""){
+  if (node && typeof node === "object" && "value" in node) return node.value ?? fallback;
+  return node ?? fallback;
+}
+
+function get(obj, path, fallback=""){
+  try{
+    let cur = obj;
+    const parts = path.split(".");
+    for (const p of parts){
+      const regex = /([^\[\]]+)|\[(\d+)\]/g;
+      let m;
+      while ((m = regex.exec(p)) !== null){
+        if (m[1] != null) cur = cur?.[m[1]];
+        else if (m[2] != null) cur = cur?.[Number(m[2])];
+      }
+    }
+    return cur ?? fallback;
+  }catch{
+    return fallback;
+  }
+}
+
+function getV(obj, path, fallback=""){
+  return valueOf(get(obj, path, fallback), fallback);
+}
+
+function renderRow(label, value){
+  return `
+    <div class="row">
+      <div class="k">${esc(label)}</div>
+      <div class="v">${value ? esc(value) : '<span class="empty">Non renseigné</span>'}</div>
+    </div>
+  `;
+}
+
+function renderCard(title, rowsHtml){
+  return `
+    <div class="card">
+      <div class="section">
+        <h2>${esc(title)}</h2>
+        ${rowsHtml}
+      </div>
+    </div>
+  `;
+}
+
+function extractApplications(grants){
+  if (!grants || !Array.isArray(grants.subventions)) return [];
+  return grants.subventions
+    .map(x => x?.application)
+    .filter(Boolean);
+}
+
+function extractPayments(grants){
+  if (!grants || !Array.isArray(grants.subventions)) return [];
+  const out = [];
+  for (const item of grants.subventions){
+    const payments = item?.payments || [];
+    for (const p of payments){
+      out.push(p);
+    }
+  }
+  return out;
+}
+
+function sum(nums){
+  return nums.reduce((a,b)=>a+(Number(b)||0),0);
+}
+
+function buildApplications(apps){
+  return apps.map((app, i) => {
+    const year = getV(app, "annee_demande");
+    const dispositif = getV(app, "dispositif");
+    const sousDispositif = getV(app, "sous_dispositif");
+    const status = firstNonEmpty(getV(app, "statut_label"), getV(app, "status"));
+    const service = getV(app, "service_instructeur");
+    const siret = getV(app, "siret");
+    const transmis = fmtDateTime(getV(app, "transmis_le"));
+    const cree = fmtDateTime(getV(app, "creer_le"));
+    const dateCommission = fmtDate(getV(app, "date_commision"));
+    const demande = getV(app, "montants.demande");
+    const accorde = getV(app, "montants.accorde");
+    const total = getV(app, "montants.total");
+    const financeurPrincipal = getV(app, "financeur_principal");
+    const cofinanceur = getV(app, "co_financement.cofinanceur");
+    const action = getV(app, "actions_proposee[0].intitule");
+    const ej = getV(app, "ej");
+    const versementKey = getV(app, "versementKey");
+    const pluriannualite = getV(app, "pluriannualite");
+
+    const title = firstNonEmpty(dispositif, `Demande ${i + 1}`);
+    const amountLabel = firstNonEmpty(
+      accorde !== "" ? formatCurrency(accorde) : "",
+      demande !== "" ? formatCurrency(demande) : "",
+      total !== "" ? formatCurrency(total) : ""
+    );
+
+    return `
+      <div class="entry">
+        <div class="entry-head">
+          <div class="entry-title">${esc(title)}${year ? ` · ${esc(String(year))}` : ""}</div>
+          <div class="entry-amount">${esc(amountLabel || "—")}</div>
+        </div>
+        ${renderRow("Statut", status)}
+        ${renderRow("Sous-dispositif", sousDispositif)}
+        ${renderRow("Action proposée", action)}
+        ${renderRow("Service instructeur", service)}
+        ${renderRow("SIRET", siret)}
+        ${renderRow("Montant demandé", demande !== "" ? formatCurrency(demande) : "")}
+        ${renderRow("Montant accordé", accorde !== "" ? formatCurrency(accorde) : "")}
+        ${renderRow("Montant total", total !== "" ? formatCurrency(total) : "")}
+        ${renderRow("Financeur principal", financeurPrincipal)}
+        ${renderRow("Cofinanceurs", cofinanceur)}
+        ${renderRow("Date de transmission", transmis)}
+        ${renderRow("Date de création", cree)}
+        ${renderRow("Date de commission", dateCommission)}
+        ${renderRow("EJ", ej)}
+        ${renderRow("VersementKey", versementKey)}
+        ${renderRow("Pluriannualité", pluriannualite === true ? "Oui" : pluriannualite === false ? "Non" : "")}
+      </div>
+    `;
+  }).join("");
+}
+
+function buildPayments(payments){
+  return payments.map((p, i) => {
+    const year = getV(p, "exerciceBudgetaire");
+    const amount = getV(p, "amount");
+    const dateOp = fmtDate(getV(p, "dateOperation"));
+    const siret = getV(p, "siret");
+    const programme = getV(p, "programme");
+    const libelleProgramme = getV(p, "libelleProgramme");
+    const ej = getV(p, "ej");
+    const centreFinancier = getV(p, "centreFinancier");
+    const domaineFonctionnel = getV(p, "domaineFonctionnel");
+    const activitee = getV(p, "activitee");
+    const codePoste = getV(p, "codePoste");
+    const versementKey = getV(p, "versementKey");
+
+    const title = firstNonEmpty(libelleProgramme, `Versement ${i + 1}`);
+
+    return `
+      <div class="entry">
+        <div class="entry-head">
+          <div class="entry-title">${esc(title)}${year ? ` · ${esc(String(year))}` : ""}</div>
+          <div class="entry-amount">${esc(amount !== "" ? formatCurrency(amount) : "—")}</div>
+        </div>
+        ${renderRow("Date d'opération", dateOp)}
+        ${renderRow("Programme", programme !== "" ? `${programme} ${libelleProgramme ? "· " + libelleProgramme : ""}` : libelleProgramme)}
+        ${renderRow("SIRET", siret)}
+        ${renderRow("EJ", ej)}
+        ${renderRow("Centre financier", centreFinancier)}
+        ${renderRow("Domaine fonctionnel", domaineFonctionnel)}
+        ${renderRow("Activité", activitee)}
+        ${renderRow("Code poste", codePoste)}
+        ${renderRow("VersementKey", versementKey)}
+      </div>
+    `;
+  }).join("");
+}
+
+function render(){
+  const record = state.record;
+  const assoc = state.assoc;
+  const grants = state.grants;
+  state.lastRenderTs = new Date();
+
+  if (!record){
+    els.content.innerHTML = "";
+    setStatus("Sélectionne une ligne dans la table source.", "warn");
+    return;
+  }
+
+  const denomination = firstNonEmpty(
+    getV(assoc, "association.denomination_siren[0]"),
+    getV(assoc, "association.denomination_rna[0]"),
+    record.Nom,
+    record.Denomination
+  );
+
+  const siren = getV(assoc, "association.siren[0]");
+  const nic = getV(assoc, "association.nic_siege[0]");
+  const siret = firstNonEmpty(
+    getV(assoc, "association.etablisements_siret[0].value[0]"),
+    siren && nic ? `${siren}${nic}` : ""
+  );
+  const rna = getV(assoc, "association.rna[0]");
+  const nature = getV(assoc, "association.nature[0]");
+  const categorie = getV(assoc, "association.categorie_juridique[0]");
+  const adrNum = firstNonEmpty(
+    getV(assoc, "association.adresse_siege_siren[0].value.numero"),
+    getV(assoc, "association.adresse_siege_rna[0].value.numero")
+  );
+  const adrType = firstNonEmpty(
+    getV(assoc, "association.adresse_siege_siren[0].value.type_voie"),
+    getV(assoc, "association.adresse_siege_rna[0].value.type_voie")
+  );
+  const adrVoie = firstNonEmpty(
+    getV(assoc, "association.adresse_siege_siren[0].value.voie"),
+    getV(assoc, "association.adresse_siege_rna[0].value.voie")
+  );
+  const cp = firstNonEmpty(
+    getV(assoc, "association.adresse_siege_siren[0].value.code_postal"),
+    getV(assoc, "association.adresse_siege_rna[0].value.code_postal")
+  );
+  const commune = firstNonEmpty(
+    getV(assoc, "association.adresse_siege_siren[0].value.commune"),
+    getV(assoc, "association.adresse_siege_rna[0].value.commune")
+  );
+  const adresseComplete = joinParts([adrNum, adrType, adrVoie, cp, commune]);
+
+  const apps = extractApplications(grants);
+  const payments = extractPayments(grants);
+
+  const totalDemande = sum(apps.map(a => getV(a, "montants.demande") || 0));
+  const totalAccorde = sum(apps.map(a => getV(a, "montants.accorde") || 0));
+  const totalVerse = sum(payments.map(p => getV(p, "amount") || 0));
+
+  const hero = `
+    <div class="card">
+      <div class="section hero">
+        <div>
+          <h1 class="title">${esc(denomination || "Association sans dénomination")}</h1>
+          <p class="subtitle">ID ligne : ${esc(String(record.id ?? ""))}
+Dernière mise à jour : ${esc(state.lastRenderTs.toLocaleString("fr-FR"))}
+Colonnes : ${esc(state.assocCol)} / ${esc(state.grantsCol)}</p>
+        </div>
+        <div class="badges">
+          ${siren ? `<span class="badge">SIREN ${esc(siren)}</span>` : ""}
+          ${siret ? `<span class="badge">SIRET ${esc(siret)}</span>` : ""}
+          ${rna ? `<span class="badge">RNA ${esc(rna)}</span>` : ""}
+          ${nature ? `<span class="badge">${esc(nature)}</span>` : ""}
+          ${commune ? `<span class="badge">${esc(commune)}</span>` : ""}
+        </div>
+      </div>
+    </div>
+  `;
+
+  const stats = `
+    <div class="card">
+      <div class="section">
+        <h2>Synthèse subventions</h2>
+        <div class="grid cols-4">
+          <div class="stat">
+            <div class="n">${apps.length}</div>
+            <div class="l">Demandes détectées</div>
+          </div>
+          <div class="stat">
+            <div class="n">${payments.length}</div>
+            <div class="l">Versements détectés</div>
+          </div>
+          <div class="stat">
+            <div class="n">${formatCurrency(totalDemande)}</div>
+            <div class="l">Total demandé</div>
+          </div>
+          <div class="stat">
+            <div class="n">${formatCurrency(totalAccorde)}</div>
+            <div class="l">Total accordé</div>
+          </div>
+          <div class="stat">
+            <div class="n">${formatCurrency(totalVerse)}</div>
+            <div class="l">Total versé</div>
+          </div>
+          <div class="stat">
+            <div class="n">${grants?.count ?? ""}</div>
+            <div class="l">Count JSON</div>
+          </div>
+          <div class="stat">
+            <div class="n">${assoc ? "Oui" : "Non"}</div>
+            <div class="l">JSON association valide</div>
+          </div>
+          <div class="stat">
+            <div class="n">${grants ? "Oui" : "Non"}</div>
+            <div class="l">JSON subventions valide</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const identite = renderCard("Identité", [
+    renderRow("SIREN", siren),
+    renderRow("SIRET", siret),
+    renderRow("RNA", rna),
+    renderRow("Catégorie juridique", categorie),
+    renderRow("Nature", nature),
+    renderRow("Adresse complète", adresseComplete),
+  ].join(""));
+
+  const demandes = `
+    <div class="card">
+      <div class="section">
+        <h2>Demandes / applications</h2>
+        ${apps.length ? `<div class="grid cols-2">${buildApplications(apps)}</div>` : `<div class="empty">Aucune demande détectée.</div>`}
+      </div>
+    </div>
+  `;
+
+  const versements = `
+    <div class="card">
+      <div class="section">
+        <h2>Versements / payments</h2>
+        ${payments.length ? `<div class="grid cols-2">${buildPayments(payments)}</div>` : `<div class="empty">Aucun versement détecté.</div>`}
+      </div>
+    </div>
+  `;
+
+  const raw = `
+    <div class="card">
+      <div class="section">
+        <h2>Données brutes</h2>
+        <details>
+          <summary>${esc(state.assocCol)}</summary>
+          <pre>${esc(JSON.stringify(assoc, null, 2))}</pre>
+        </details>
+        <div style="height:10px"></div>
+        <details>
+          <summary>${esc(state.grantsCol)}</summary>
+          <pre>${esc(JSON.stringify(grants, null, 2))}</pre>
+        </details>
+      </div>
+    </div>
+  `;
+
+  els.content.innerHTML = `
+    ${hero}
+    <div class="grid cols-2">
+      ${identite}
+      ${stats}
+    </div>
+    ${demandes}
+    ${versements}
+    ${raw}
+  `;
+
+  setStatus(`Fiche chargée pour la ligne ${record.id}.`, (assoc || grants) ? "ok" : "warn");
+}
+
+function refreshFromRecord(){
+  if (!state.record){
+    state.assoc = null;
+    state.grants = null;
+    render();
+    return;
+  }
+  state.assoc = safeParse(state.record[state.assocCol]);
+  state.grants = safeParse(state.record[state.grantsCol]);
+  render();
+}
+
+function initSelectors(record){
+  state.sourceColumns = Object.keys(record).filter(c => c !== "manualSort");
+  populateSelect(els.assocCol, state.sourceColumns, state.assocCol);
+  populateSelect(els.grantsCol, state.sourceColumns, state.grantsCol);
+
+  if (!state.sourceColumns.includes(state.assocCol) && state.sourceColumns.length) {
+    state.assocCol = state.sourceColumns[0];
+    els.assocCol.value = state.assocCol;
+  }
+  if (!state.sourceColumns.includes(state.grantsCol) && state.sourceColumns.length) {
+    state.grantsCol = state.sourceColumns[0];
+    els.grantsCol.value = state.grantsCol;
+  }
+}
+
+els.assocCol.addEventListener("change", () => {
+  state.assocCol = els.assocCol.value;
+  refreshFromRecord();
+});
+
+els.grantsCol.addEventListener("change", () => {
+  state.grantsCol = els.grantsCol.value;
+  refreshFromRecord();
+});
+
+grist.ready({requiredAccess: "read table"});
+
+grist.onRecord((record) => {
+  state.record = record || null;
+
+  if (record && !state.sourceColumns.length) {
+    initSelectors(record);
+  } else if (record) {
+    const cols = Object.keys(record).filter(c => c !== "manualSort");
+    if (JSON.stringify(cols) !== JSON.stringify(state.sourceColumns)) {
+      initSelectors(record);
+    }
+  }
+
+  refreshFromRecord();
+});
+</script>
+</body>
+</html>
