@@ -1,0 +1,632 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Data.Subvention → Grist</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      margin: 12px;
+      color: #222;
+    }
+    #app {
+      border: 1px solid #d0d7de;
+      border-radius: 12px;
+      padding: 12px;
+      background: #fff;
+      max-height: 85vh;
+      overflow: auto;
+    }
+    .row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .stack {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 220px;
+      flex: 1 1 240px;
+    }
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid #d0d7de;
+      font-size: 12px;
+    }
+    .ok { color: #0a7; }
+    .warn { color: #b26a00; }
+    .err { color: #c0392b; }
+    .muted { color: #666; font-size: 12px; }
+    input[type="password"], input[type="number"], select {
+      padding: 8px 10px;
+      border: 1px solid #c8d1dc;
+      border-radius: 8px;
+      width: 100%;
+      box-sizing: border-box;
+      background: #fff;
+    }
+    button {
+      padding: 8px 12px;
+      border: 1px solid #c8d1dc;
+      border-radius: 8px;
+      background: #f6f8fa;
+      cursor: pointer;
+    }
+    button:hover { background: #eef2f6; }
+    pre {
+      background: #f6f8fa;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 10px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .section-title {
+      font-weight: 600;
+      margin: 10px 0 4px;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="row">
+      <span id="status" class="pill warn">initialisation…</span>
+      <span id="hint" class="muted">Chargement du plugin Grist…</span>
+    </div>
+
+    <div class="section-title">Authentification API</div>
+    <div class="row">
+      <div class="stack" style="flex: 1 1 520px;">
+        <label for="tokenInput">Consumer token Data.Subvention</label>
+        <input id="tokenInput" type="password" placeholder="Collez le token ici" />
+      </div>
+      <div class="row" style="margin-top:18px;">
+        <button id="toggleToken" type="button">Afficher</button>
+        <button id="applyToken" type="button">Utiliser</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <span id="tokenStatus" class="muted">Aucun token saisi</span>
+    </div>
+
+    <div class="section-title">Mapping des colonnes</div>
+    <div class="row">
+      <div class="stack">
+        <label for="mapSiret">Colonne SIRET</label>
+        <select id="mapSiret"></select>
+      </div>
+      <div class="stack">
+        <label for="mapSiren">Colonne SIREN</label>
+        <select id="mapSiren"></select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="stack">
+        <label for="mapStatus">Colonne statut</label>
+        <select id="mapStatus"></select>
+      </div>
+      <div class="stack">
+        <label for="mapError">Colonne erreur</label>
+        <select id="mapError"></select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="stack">
+        <label for="mapAssocJson">Colonne JSON association</label>
+        <select id="mapAssocJson"></select>
+      </div>
+      <div class="stack">
+        <label for="mapGrantsJson">Colonne JSON grants</label>
+        <select id="mapGrantsJson"></select>
+      </div>
+    </div>
+
+    <div class="row">
+      <button id="saveMappingBtn" type="button">Enregistrer le mapping</button>
+      <button id="runBtn" type="button">Charger la ligne sélectionnée</button>
+    </div>
+
+    <div class="section-title">Traitement en lot</div>
+    <div class="row">
+      <div class="stack">
+        <label for="delayInput">Délai entre appels API (ms)</label>
+        <input id="delayInput" type="number" min="0" step="100" value="3000" />
+      </div>
+      <div class="stack">
+        <label for="limitInput">Limiter à N lignes (optionnel)</label>
+        <input id="limitInput" type="number" min="0" step="1" placeholder="0 = toutes" />
+      </div>
+    </div>
+
+    <div class="row">
+      <button id="runAllBtn" type="button">Traiter toutes les lignes visibles</button>
+      <button id="stopBtn" type="button">Arrêter</button>
+    </div>
+
+    <div id="progress" class="muted"></div>
+    <div id="content"></div>
+  </div>
+
+  <script>
+    const statusEl = document.getElementById("status");
+    const hintEl = document.getElementById("hint");
+    const contentEl = document.getElementById("content");
+    const progressEl = document.getElementById("progress");
+
+    const tokenInputEl = document.getElementById("tokenInput");
+    const toggleTokenBtn = document.getElementById("toggleToken");
+    const applyTokenBtn = document.getElementById("applyToken");
+    const tokenStatusEl = document.getElementById("tokenStatus");
+
+    const mapSiretEl = document.getElementById("mapSiret");
+    const mapSirenEl = document.getElementById("mapSiren");
+    const mapStatusEl = document.getElementById("mapStatus");
+    const mapErrorEl = document.getElementById("mapError");
+    const mapAssocJsonEl = document.getElementById("mapAssocJson");
+    const mapGrantsJsonEl = document.getElementById("mapGrantsJson");
+    const saveMappingBtn = document.getElementById("saveMappingBtn");
+    const runBtn = document.getElementById("runBtn");
+
+    const delayInput = document.getElementById("delayInput");
+    const limitInput = document.getElementById("limitInput");
+    const runAllBtn = document.getElementById("runAllBtn");
+    const stopBtn = document.getElementById("stopBtn");
+
+    let runtimeToken = "";
+    let currentRecord = null;
+    let currentFields = {};
+    let visibleRecords = [];
+    let stopRequested = false;
+
+    let mapping = {
+      siret: "",
+      siren: "",
+      status: "",
+      error: "",
+      assocJson: "",
+      grantsJson: ""
+    };
+
+    const STORAGE_KEY = "datasubvention_widget_mapping_v2";
+    const API_ASSOC = "https://api.datasubvention.beta.gouv.fr/association/{SIREN}";
+    const API_GRANTS = "https://api.datasubvention.beta.gouv.fr/association/{SIREN}/grants";
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+    }
+
+    function setStatus(text, cls) {
+      statusEl.textContent = text;
+      statusEl.className = "pill " + (cls || "");
+    }
+
+    function showError(err) {
+      const msg = err && err.message ? err.message : String(err);
+      setStatus("erreur", "err");
+      contentEl.innerHTML = `<pre>${escapeHtml(msg)}</pre>`;
+    }
+
+    window.addEventListener("error", (e) => showError(e.error || e.message || e));
+    window.addEventListener("unhandledrejection", (e) => showError(e.reason || e));
+
+    function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function loadScript(src) {
+      return new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = src;
+        s.async = true;
+        s.onload = resolve;
+        s.onerror = () => reject(new Error("Impossible de charger " + src));
+        document.head.appendChild(s);
+      });
+    }
+
+    async function ensureGristApi() {
+      if (window.grist) return;
+
+      try { await loadScript("https://grist.numerique.gouv.fr/grist-plugin-api.js"); } catch (_) {}
+      if (window.grist) return;
+
+      await loadScript("https://docs.getgrist.com/grist-plugin-api.js");
+      if (!window.grist) {
+        throw new Error("grist-plugin-api.js introuvable");
+      }
+    }
+
+    function getFields(record) {
+      if (!record || typeof record !== "object") return {};
+      if (record.fields && typeof record.fields === "object") return record.fields;
+      return record;
+    }
+
+    function normalizeDigits(value) {
+      return String(value || "").replace(/\D/g, "");
+    }
+
+    function saveMapping() {
+      mapping = {
+        siret: mapSiretEl.value,
+        siren: mapSirenEl.value,
+        status: mapStatusEl.value,
+        error: mapErrorEl.value,
+        assocJson: mapAssocJsonEl.value,
+        grantsJson: mapGrantsJsonEl.value
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(mapping));
+    }
+
+    function loadMapping() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
+        const saved = JSON.parse(raw);
+        mapping = { ...mapping, ...saved };
+      } catch (_) {}
+    }
+
+    function makeOption(value, text) {
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = text;
+      return opt;
+    }
+
+    function fillSelect(selectEl, columns, preferredValue = "") {
+      selectEl.innerHTML = "";
+      selectEl.appendChild(makeOption("", "— choisir une colonne —"));
+      columns.forEach(col => {
+        selectEl.appendChild(makeOption(col, col));
+      });
+      if (preferredValue && columns.includes(preferredValue)) {
+        selectEl.value = preferredValue;
+      }
+    }
+
+    function autoGuess(columns, candidates) {
+      const lowerMap = new Map(columns.map(c => [c.toLowerCase(), c]));
+      for (const c of candidates) {
+        if (lowerMap.has(c.toLowerCase())) return lowerMap.get(c.toLowerCase());
+      }
+      return "";
+    }
+
+    function refreshMappingSelectors(fields) {
+      const columns = Object.keys(fields || {});
+      fillSelect(mapSiretEl, columns, mapping.siret || autoGuess(columns, ["SIRET", "siret", "N_Siret", "n_siret"]));
+      fillSelect(mapSirenEl, columns, mapping.siren || autoGuess(columns, ["SIREN", "siren", "N_Siren", "n_siren"]));
+      fillSelect(mapStatusEl, columns, mapping.status || autoGuess(columns, ["ds_status"]));
+      fillSelect(mapErrorEl, columns, mapping.error || autoGuess(columns, ["ds_error"]));
+      fillSelect(mapAssocJsonEl, columns, mapping.assocJson || autoGuess(columns, ["ds_assos_json"]));
+      fillSelect(mapGrantsJsonEl, columns, mapping.grantsJson || autoGuess(columns, ["ds_assos_grants"]));
+    }
+
+    function getSelectedMapping() {
+      return {
+        siret: mapSiretEl.value,
+        siren: mapSirenEl.value,
+        status: mapStatusEl.value,
+        error: mapErrorEl.value,
+        assocJson: mapAssocJsonEl.value,
+        grantsJson: mapGrantsJsonEl.value
+      };
+    }
+
+    function validateMapping(m) {
+      const missing = [];
+      if (!m.siret) missing.push("SIRET");
+      if (!m.siren) missing.push("SIREN");
+      if (!m.status) missing.push("statut");
+      if (!m.error) missing.push("erreur");
+      if (!m.assocJson) missing.push("JSON association");
+      if (!m.grantsJson) missing.push("JSON grants");
+
+      if (missing.length) {
+        throw new Error("Mapping incomplet. Colonnes à renseigner : " + missing.join(", "));
+      }
+    }
+
+    async function fetchJson(url, token) {
+      let response = await fetch(url, {
+        headers: {
+          "Accept": "application/json",
+          "x-access-token": token
+        }
+      });
+
+      if (response.status === 401) {
+        response = await fetch(url, {
+          headers: {
+            "Accept": "application/json",
+            "Authorization": `Bearer ${token}`
+          }
+        });
+      }
+
+      const rawText = await response.text().catch(() => "");
+      let parsed = null;
+      try {
+        parsed = rawText ? JSON.parse(rawText) : null;
+      } catch (_) {
+        parsed = null;
+      }
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}\nURL: ${url}\n${rawText || "(pas de corps de réponse)"}`);
+      }
+
+      return parsed ?? rawText;
+    }
+
+    async function getTableOps() {
+      return grist.getTable();
+    }
+
+    async function updateRecord(record, fieldsToWrite) {
+      const table = await getTableOps();
+      await table.update([{
+        id: record.id,
+        fields: fieldsToWrite
+      }]);
+    }
+
+    function buildWritePayload(fields, assocData, grantsData, assocError, grantsError, m) {
+      return {
+        [m.status]: (assocData || grantsData) ? "ok_partiel_ou_total" : "erreur",
+        [m.error]: [assocError, grantsError].filter(Boolean).join("\n\n"),
+        [m.assocJson]: assocData ? JSON.stringify(assocData) : "",
+        [m.grantsJson]: grantsData ? JSON.stringify(grantsData) : ""
+      };
+    }
+
+    async function processRecord(record) {
+      const m = getSelectedMapping();
+      validateMapping(m);
+
+      const fields = getFields(record);
+      const siret = normalizeDigits(fields[m.siret]);
+      let siren = normalizeDigits(fields[m.siren]);
+
+      if (!siren && siret && siret.length >= 9) {
+        siren = siret.slice(0, 9);
+      }
+
+      if (!siret) {
+        return { ok: false, error: `SIRET invalide dans ${m.siret}` };
+      }
+
+      if (!siren) {
+        return { ok: false, error: `SIREN invalide dans ${m.siren}` };
+      }
+
+      const assocUrl = API_ASSOC.replace("{SIREN}", encodeURIComponent(siren));
+      const grantsUrl = API_GRANTS.replace("{SIREN}", encodeURIComponent(siren));
+
+      let assocData = null;
+      let grantsData = null;
+      let assocError = "";
+      let grantsError = "";
+
+      try {
+        assocData = await fetchJson(assocUrl, runtimeToken);
+      } catch (e) {
+        assocError = e.message || String(e);
+      }
+
+      try {
+        grantsData = await fetchJson(grantsUrl, runtimeToken);
+      } catch (e) {
+        grantsError = e.message || String(e);
+      }
+
+      const fieldsToWrite = buildWritePayload(fields, assocData, grantsData, assocError, grantsError, m);
+      await updateRecord(record, fieldsToWrite);
+
+      return {
+        ok: true,
+        siret,
+        siren,
+        assocOk: !!assocData,
+        grantsOk: !!grantsData
+      };
+    }
+
+    async function processCurrentRecord() {
+      if (!runtimeToken) {
+        throw new Error("Aucun consumer token saisi.");
+      }
+      if (!currentRecord) {
+        throw new Error("Aucune ligne sélectionnée.");
+      }
+
+      saveMapping();
+
+      setStatus("chargement…", "warn");
+      contentEl.innerHTML = `<pre>Traitement de la ligne sélectionnée…</pre>`;
+
+      const result = await processRecord(currentRecord);
+
+      if (!result.ok) {
+        throw new Error(result.error);
+      }
+
+      setStatus("ok", "ok");
+      contentEl.innerHTML = `
+        <pre>SIRET : ${escapeHtml(result.siret)}
+SIREN : ${escapeHtml(result.siren)}
+
+Association : ${result.assocOk ? "ok" : "échec"}
+Grants : ${result.grantsOk ? "ok" : "échec"}
+
+Mise à jour terminée.</pre>
+      `;
+    }
+
+    async function getVisibleRecords() {
+      if (Array.isArray(visibleRecords) && visibleRecords.length) {
+        return visibleRecords;
+      }
+      if (grist.docApi && grist.docApi.fetchSelectedTable) {
+        const recs = await grist.docApi.fetchSelectedTable();
+        return Array.isArray(recs) ? recs : [];
+      }
+      throw new Error("Impossible de récupérer les lignes visibles.");
+    }
+
+    async function processAllVisibleRecords() {
+      if (!runtimeToken) {
+        throw new Error("Aucun consumer token saisi.");
+      }
+
+      const m = getSelectedMapping();
+      validateMapping(m);
+      saveMapping();
+
+      stopRequested = false;
+
+      const delay = parseInt(delayInput.value || "0", 10);
+      const limit = parseInt(limitInput.value || "0", 10);
+
+      let records = await getVisibleRecords();
+      if (limit > 0) {
+        records = records.slice(0, limit);
+      }
+
+      if (!records.length) {
+        throw new Error("Aucune ligne visible à traiter.");
+      }
+
+      let ok = 0;
+      let errors = 0;
+      let skipped = 0;
+
+      setStatus("traitement…", "warn");
+      contentEl.innerHTML = `<pre>Traitement en lot démarré sur ${records.length} ligne(s)…</pre>`;
+
+      for (let i = 0; i < records.length; i++) {
+        if (stopRequested) {
+          break;
+        }
+
+        const rec = records[i];
+        const fields = getFields(rec);
+        const siretPreview = fields[m.siret] || "";
+        const sirenPreview = fields[m.siren] || "";
+
+        progressEl.textContent =
+          `Ligne ${i + 1} / ${records.length} — OK:${ok} ERREUR:${errors} IGNORÉ:${skipped} — SIRET:${siretPreview} SIREN:${sirenPreview}`;
+
+        try {
+          const result = await processRecord(rec);
+          if (result.ok) ok++;
+          else {
+            errors++;
+          }
+        } catch (err) {
+          errors++;
+        }
+
+        if (delay > 0 && i < records.length - 1 && !stopRequested) {
+          await sleep(delay);
+        }
+      }
+
+      setStatus(stopRequested ? "arrêté" : "terminé", stopRequested ? "warn" : "ok");
+      progressEl.textContent =
+        `${stopRequested ? "Arrêt demandé" : "Terminé"} — OK:${ok} ERREUR:${errors} IGNORÉ:${skipped} TOTAL:${records.length}`;
+    }
+
+    toggleTokenBtn.addEventListener("click", () => {
+      tokenInputEl.type = tokenInputEl.type === "password" ? "text" : "password";
+      toggleTokenBtn.textContent = tokenInputEl.type === "password" ? "Afficher" : "Masquer";
+    });
+
+    applyTokenBtn.addEventListener("click", () => {
+      runtimeToken = tokenInputEl.value.trim();
+      tokenStatusEl.textContent = runtimeToken ? "token personnalisé actif" : "aucun token saisi";
+    });
+
+    saveMappingBtn.addEventListener("click", () => {
+      try {
+        validateMapping(getSelectedMapping());
+        saveMapping();
+        contentEl.innerHTML = "<pre>Mapping enregistré.</pre>";
+      } catch (err) {
+        showError(err);
+      }
+    });
+
+    runBtn.addEventListener("click", async () => {
+      try {
+        await processCurrentRecord();
+      } catch (err) {
+        showError(err);
+      }
+    });
+
+    runAllBtn.addEventListener("click", async () => {
+      try {
+        await processAllVisibleRecords();
+      } catch (err) {
+        showError(err);
+      }
+    });
+
+    stopBtn.addEventListener("click", () => {
+      stopRequested = true;
+    });
+
+    async function main() {
+      setStatus("chargement…", "warn");
+      hintEl.textContent = "Chargement de l’API Grist…";
+
+      await ensureGristApi();
+      loadMapping();
+
+      setStatus("en attente", "warn");
+      hintEl.textContent = "Sélectionnez une ligne puis vérifiez le mapping des colonnes.";
+
+      grist.ready({ requiredAccess: "full" });
+
+      if (grist.onRecords) {
+        grist.onRecords((records) => {
+          visibleRecords = Array.isArray(records) ? records : [];
+        });
+      }
+
+      grist.onRecord((record) => {
+        currentRecord = record;
+        currentFields = getFields(record);
+        refreshMappingSelectors(currentFields);
+
+        const selected = getSelectedMapping();
+
+        contentEl.innerHTML = `
+          <pre>Ligne sélectionnée
+Colonnes reçues : ${escapeHtml(Object.keys(currentFields).join(", "))}
+SIRET (mappé) : ${escapeHtml(selected.siret ? String(currentFields[selected.siret] || "") : "")}
+SIREN (mappé) : ${escapeHtml(selected.siren ? String(currentFields[selected.siren] || "") : "")}</pre>
+        `;
+      });
+    }
+
+    main().catch(showError);
+  </script>
+</body>
+</html>
