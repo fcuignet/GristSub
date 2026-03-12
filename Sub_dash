@@ -1,0 +1,673 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"/>
+<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body{
+  font-family:Inter,system-ui,sans-serif;
+  margin:0;
+  background:#f4f7fb;
+  color:#1f2937;
+}
+.app{
+  padding:12px;
+  display:grid;
+  gap:12px;
+}
+.card{
+  background:white;
+  border-radius:12px;
+  border:1px solid #e5e7eb;
+  padding:12px;
+}
+.tabs{
+  display:flex;
+  gap:6px;
+  margin-bottom:10px;
+  flex-wrap:wrap;
+}
+.tab{
+  padding:7px 11px;
+  border-radius:8px;
+  cursor:pointer;
+  background:#f1f5f9;
+  font-size:13px;
+}
+.tab.active{
+  background:#2563eb;
+  color:white;
+}
+.filters{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-bottom:10px;
+}
+select{
+  padding:6px 8px;
+  border-radius:6px;
+  border:1px solid #d1d5db;
+  background:white;
+}
+.grid{
+  display:grid;
+  grid-template-columns:repeat(2,1fr);
+  gap:10px;
+}
+.grid-compact{
+  display:grid;
+  grid-template-columns:1.2fr 0.8fr;
+  gap:12px;
+  align-items:start;
+}
+.grid-4{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:8px;
+}
+@media (max-width: 1000px){
+  .grid,.grid-compact,.grid-4{
+    grid-template-columns:1fr;
+  }
+}
+.entry{
+  border:1px solid #e5e7eb;
+  border-radius:10px;
+  padding:10px;
+  background:#fafafa;
+}
+.entry-title{
+  font-weight:700;
+  margin-bottom:4px;
+  font-size:14px;
+}
+.entry-sub{
+  font-size:12px;
+  color:#6b7280;
+  margin-bottom:5px;
+}
+.amount{
+  color:#2563eb;
+  font-weight:700;
+  margin-bottom:4px;
+}
+.stat{
+  border:1px solid #e5e7eb;
+  border-radius:10px;
+  padding:10px;
+  background:#fafafa;
+}
+.stat-number{
+  font-size:18px;
+  font-weight:700;
+}
+.stat-label{
+  font-size:11px;
+  color:#6b7280;
+}
+.year-block{
+  border-left:4px solid #2563eb;
+  padding-left:10px;
+  margin-bottom:12px;
+}
+.year-title{
+  font-size:17px;
+  font-weight:700;
+  margin-bottom:8px;
+}
+.tag{
+  display:inline-block;
+  background:#eff6ff;
+  color:#1d4ed8;
+  border:1px solid #bfdbfe;
+  border-radius:999px;
+  padding:2px 8px;
+  font-size:11px;
+  margin:2px 4px 2px 0;
+}
+pre{
+  background:#0f172a;
+  color:#e5e7eb;
+  padding:12px;
+  overflow:auto;
+  border-radius:8px;
+  font-size:12px;
+}
+h3{
+  margin:0 0 8px 0;
+  font-size:14px;
+}
+.muted{
+  color:#6b7280;
+  font-size:12px;
+}
+.chart-wrap{
+  background:#fff;
+  border:1px solid #e5e7eb;
+  border-radius:10px;
+  padding:8px;
+}
+.chart-wrap + .chart-wrap{
+  margin-top:8px;
+}
+.chart-sm{
+  height:190px;
+}
+.chart-md{
+  height:220px;
+}
+.summary-left{
+  display:grid;
+  gap:10px;
+}
+.summary-right{
+  display:grid;
+  gap:8px;
+}
+.kpi-list{
+  display:grid;
+  gap:8px;
+}
+.kpi-row{
+  display:grid;
+  grid-template-columns:repeat(2,1fr);
+  gap:8px;
+}
+@media (max-width: 700px){
+  .kpi-row{
+    grid-template-columns:1fr;
+  }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="card">
+    <div class="tabs">
+      <div class="tab active" data-tab="summary">Synthèse</div>
+      <div class="tab" data-tab="timeline">Timeline</div>
+      <div class="tab" data-tab="apps">Demandes</div>
+      <div class="tab" data-tab="payments">Versements</div>
+      <div class="tab" data-tab="analytics">Financeurs / dispositifs</div>
+      <div class="tab" data-tab="raw">JSON</div>
+    </div>
+
+    <div class="filters">
+      <select id="yearFilter"></select>
+      <select id="deviceFilter"></select>
+    </div>
+
+    <div id="content"></div>
+  </div>
+</div>
+
+<script>
+const state = {
+  record: null,
+  grants: null,
+  apps: [],
+  payments: [],
+  tab: "summary",
+  year: null,
+  device: null,
+  charts: []
+};
+
+function parse(v){
+  if(!v) return null;
+  if(typeof v === "object") return v;
+  try { return JSON.parse(v); } catch { return null; }
+}
+
+function val(x){
+  if(!x) return "";
+  if(typeof x === "object" && "value" in x) return x.value;
+  return x;
+}
+
+function currency(n){
+  if(n === null || n === undefined || n === "") return "";
+  const num = Number(n);
+  if(Number.isNaN(num)) return "";
+  return new Intl.NumberFormat("fr-FR",{style:"currency",currency:"EUR"}).format(num);
+}
+
+function fmtDate(v){
+  if(!v) return "";
+  const d = new Date(v);
+  if(Number.isNaN(d.getTime())) return String(v);
+  return d.toLocaleDateString("fr-FR");
+}
+
+function getApps(grants){
+  if(!grants?.subventions) return [];
+  return grants.subventions.map(x => x.application).filter(Boolean);
+}
+
+function getPayments(grants){
+  const out = [];
+  if(!grants?.subventions) return out;
+  for(const s of grants.subventions){
+    for(const p of (s.payments || [])){
+      out.push(p);
+    }
+  }
+  return out;
+}
+
+function buildFilters(){
+  const years = [...new Set([
+    ...state.apps.map(a => String(val(a.annee_demande) || "")),
+    ...state.payments.map(p => String(val(p.exerciceBudgetaire) || ""))
+  ].filter(Boolean))].sort((a,b)=>Number(b)-Number(a));
+
+  const devices = [...new Set(state.apps.map(a => String(val(a.dispositif) || "")).filter(Boolean))].sort();
+
+  const yearSel = document.getElementById("yearFilter");
+  const devSel = document.getElementById("deviceFilter");
+
+  yearSel.innerHTML = `<option value="">Toutes années</option>` + years.map(y => `<option value="${escapeHtml(y)}">${escapeHtml(y)}</option>`).join("");
+  devSel.innerHTML = `<option value="">Tous dispositifs</option>` + devices.map(d => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join("");
+
+  if(state.year) yearSel.value = state.year;
+  if(state.device) devSel.value = state.device;
+
+  yearSel.onchange = () => {
+    state.year = yearSel.value || null;
+    render();
+  };
+  devSel.onchange = () => {
+    state.device = devSel.value || null;
+    render();
+  };
+}
+
+function escapeHtml(s){
+  return String(s ?? "")
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;");
+}
+
+function filterApps(){
+  return state.apps.filter(a => {
+    const year = String(val(a.annee_demande) || "");
+    const device = String(val(a.dispositif) || "");
+    if(state.year && year !== state.year) return false;
+    if(state.device && device !== state.device) return false;
+    return true;
+  });
+}
+
+function filterPayments(){
+  return state.payments.filter(p => {
+    const year = String(val(p.exerciceBudgetaire) || "");
+    if(state.year && year !== state.year) return false;
+    return true;
+  });
+}
+
+function sum(list){
+  return list.reduce((s, n) => s + (Number(n) || 0), 0);
+}
+
+function destroyCharts(){
+  for(const c of state.charts){
+    try { c.destroy(); } catch {}
+  }
+  state.charts = [];
+}
+
+function normalizedFunder(app){
+  const raw = String(val(app.financeur_principal) || "").trim();
+  if (raw) return raw;
+  const dispositif = String(val(app.dispositif) || "").trim();
+  if (dispositif) return dispositif;
+  return "Non renseigné";
+}
+
+function renderSummary(){
+  const apps = filterApps();
+  const payments = filterPayments();
+
+  const totalDemande = sum(apps.map(a => val(a.montants?.demande)));
+  const totalAccorde = sum(apps.map(a => val(a.montants?.accorde)));
+  const totalVerse = sum(payments.map(p => val(p.amount)));
+
+  const nbDevices = [...new Set(apps.map(a => val(a.dispositif)).filter(Boolean))].length;
+  const nbFunders = [...new Set(apps.map(a => normalizedFunder(a)).filter(Boolean))].length;
+
+  return `
+    <div class="grid-compact">
+      <div class="summary-left">
+        <div class="kpi-list">
+          <div class="kpi-row">
+            <div class="stat"><div class="stat-number">${apps.length}</div><div class="stat-label">Demandes</div></div>
+            <div class="stat"><div class="stat-number">${payments.length}</div><div class="stat-label">Versements</div></div>
+          </div>
+          <div class="kpi-row">
+            <div class="stat"><div class="stat-number">${escapeHtml(currency(totalDemande))}</div><div class="stat-label">Total demandé</div></div>
+            <div class="stat"><div class="stat-number">${escapeHtml(currency(totalAccorde))}</div><div class="stat-label">Total accordé</div></div>
+          </div>
+          <div class="kpi-row">
+            <div class="stat"><div class="stat-number">${escapeHtml(currency(totalVerse))}</div><div class="stat-label">Total versé</div></div>
+            <div class="stat"><div class="stat-number">${escapeHtml(String(state.grants?.count ?? ""))}</div><div class="stat-label">Count JSON</div></div>
+          </div>
+          <div class="kpi-row">
+            <div class="stat"><div class="stat-number">${escapeHtml(String(nbDevices))}</div><div class="stat-label">Dispositifs</div></div>
+            <div class="stat"><div class="stat-number">${escapeHtml(String(nbFunders))}</div><div class="stat-label">Financeurs principaux</div></div>
+          </div>
+        </div>
+
+        <div class="chart-wrap">
+          <h3>Montants par année et financeur principal</h3>
+          <canvas id="chartStacked" class="chart-md"></canvas>
+          <div class="muted">Barres empilées : chaque segment correspond à un financeur principal.</div>
+        </div>
+      </div>
+
+      <div class="summary-right">
+        <div class="chart-wrap">
+          <h3>Versé par année</h3>
+          <canvas id="chartPaid" class="chart-sm"></canvas>
+        </div>
+        <div class="chart-wrap">
+          <h3>Répartition par dispositif</h3>
+          <canvas id="chartDevice" class="chart-sm"></canvas>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderTimeline(){
+  const apps = filterApps();
+  const payments = filterPayments();
+
+  const years = [...new Set([
+    ...apps.map(a => String(val(a.annee_demande) || "")),
+    ...payments.map(p => String(val(p.exerciceBudgetaire) || ""))
+  ].filter(Boolean))].sort((a,b)=>Number(b)-Number(a));
+
+  if(!years.length){
+    return `<div class="muted">Aucune donnée pour les filtres sélectionnés.</div>`;
+  }
+
+  return years.map(year => {
+    const yearApps = apps
+      .filter(a => String(val(a.annee_demande) || "") === year)
+      .sort((a,b) => {
+        const ad = String(val(a.transmis_le) || "");
+        const bd = String(val(b.transmis_le) || "");
+        return bd.localeCompare(ad);
+      });
+
+    const yearPayments = payments
+      .filter(p => String(val(p.exerciceBudgetaire) || "") === year)
+      .sort((a,b) => {
+        const ad = String(val(a.dateOperation) || "");
+        const bd = String(val(b.dateOperation) || "");
+        return bd.localeCompare(ad);
+      });
+
+    return `
+      <div class="year-block">
+        <div class="year-title">${escapeHtml(year)}</div>
+        <div class="grid">
+          <div>
+            <h3>Demandes</h3>
+            ${yearApps.length ? yearApps.map(a => `
+              <div class="entry">
+                <div class="entry-title">${escapeHtml(String(val(a.dispositif) || "Demande"))}</div>
+                <div class="entry-sub">${escapeHtml(String(val(a.statut_label) || val(a.status) || ""))} · ${escapeHtml(fmtDate(val(a.transmis_le)))}</div>
+                <div class="amount">${escapeHtml(currency(val(a.montants?.accorde) || val(a.montants?.demande)))}</div>
+                <div>${escapeHtml(String(val(a.service_instructeur) || ""))}</div>
+              </div>
+            `).join("") : `<div class="muted">Aucune demande</div>`}
+          </div>
+          <div>
+            <h3>Versements</h3>
+            ${yearPayments.length ? yearPayments.map(p => `
+              <div class="entry">
+                <div class="entry-title">${escapeHtml(String(val(p.libelleProgramme) || "Versement"))}</div>
+                <div class="entry-sub">${escapeHtml(fmtDate(val(p.dateOperation)))}</div>
+                <div class="amount">${escapeHtml(currency(val(p.amount)))}</div>
+                <div>${escapeHtml(String(val(p.centreFinancier) || ""))}</div>
+              </div>
+            `).join("") : `<div class="muted">Aucun versement</div>`}
+          </div>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderApps(){
+  const apps = filterApps()
+    .sort((a,b) => {
+      const ay = Number(val(a.annee_demande) || 0);
+      const by = Number(val(b.annee_demande) || 0);
+      if (by !== ay) return by - ay;
+      return String(val(b.transmis_le) || "").localeCompare(String(val(a.transmis_le) || ""));
+    });
+
+  if(!apps.length) return `<div class="muted">Aucune demande pour les filtres sélectionnés.</div>`;
+
+  return `
+    <div class="grid">
+      ${apps.map(a => `
+        <div class="entry">
+          <div class="entry-title">${escapeHtml(String(val(a.dispositif) || "Demande"))} · ${escapeHtml(String(val(a.annee_demande) || ""))}</div>
+          <div class="entry-sub">${escapeHtml(String(val(a.statut_label) || val(a.status) || ""))}</div>
+          <div class="amount">${escapeHtml(currency(val(a.montants?.accorde) || val(a.montants?.demande) || val(a.montants?.total)))}</div>
+          <div>${escapeHtml(String(val(a.service_instructeur) || ""))}</div>
+          <div>${escapeHtml(String(val(a.actions_proposee?.[0]?.intitule) || ""))}</div>
+          <div class="muted">${escapeHtml(normalizedFunder(a))}</div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderPayments(){
+  const payments = filterPayments()
+    .sort((a,b) => {
+      const ay = Number(val(a.exerciceBudgetaire) || 0);
+      const by = Number(val(b.exerciceBudgetaire) || 0);
+      if (by !== ay) return by - ay;
+      return String(val(b.dateOperation) || "").localeCompare(String(val(a.dateOperation) || ""));
+    });
+
+  if(!payments.length) return `<div class="muted">Aucun versement pour les filtres sélectionnés.</div>`;
+
+  return `
+    <div class="grid">
+      ${payments.map(p => `
+        <div class="entry">
+          <div class="entry-title">${escapeHtml(String(val(p.libelleProgramme) || "Versement"))}</div>
+          <div class="entry-sub">${escapeHtml(String(val(p.exerciceBudgetaire) || ""))} · ${escapeHtml(fmtDate(val(p.dateOperation)))}</div>
+          <div class="amount">${escapeHtml(currency(val(p.amount)))}</div>
+          <div>${escapeHtml(String(val(p.centreFinancier) || ""))}</div>
+          <div>${escapeHtml(String(val(p.domaineFonctionnel) || ""))}</div>
+          <div class="muted">${escapeHtml(String(val(p.activitee) || ""))}</div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderAnalytics(){
+  const apps = filterApps();
+  const deviceMap = {};
+  const funderMap = {};
+
+  for(const a of apps){
+    const device = String(val(a.dispositif) || "Sans dispositif");
+    deviceMap[device] = (deviceMap[device] || 0) + (Number(val(a.montants?.accorde) || val(a.montants?.demande) || 0));
+    const funder = normalizedFunder(a);
+    funderMap[funder] = (funderMap[funder] || 0) + 1;
+  }
+
+  const topDevices = Object.entries(deviceMap).sort((a,b)=>b[1]-a[1]);
+  const topFunders = Object.entries(funderMap).sort((a,b)=>b[1]-a[1]);
+
+  return `
+    <div class="grid">
+      <div class="entry">
+        <h3>Dispositifs</h3>
+        ${topDevices.length ? topDevices.map(([k,v]) => `<div><span class="tag">${escapeHtml(k)}</span> ${escapeHtml(currency(v))}</div>`).join("") : `<div class="muted">Aucune donnée</div>`}
+      </div>
+      <div class="entry">
+        <h3>Financeurs principaux</h3>
+        ${topFunders.length ? topFunders.map(([k,v]) => `<div><span class="tag">${escapeHtml(k)}</span> ${escapeHtml(String(v))} dossier(s)</div>`).join("") : `<div class="muted">Aucune donnée</div>`}
+      </div>
+    </div>
+  `;
+}
+
+function renderRaw(){
+  return `<pre>${escapeHtml(JSON.stringify(state.grants, null, 2))}</pre>`;
+}
+
+function buildCharts(){
+  destroyCharts();
+
+  const allApps = filterApps();
+  const allPayments = filterPayments();
+
+  const years = [...new Set([
+    ...allApps.map(a => String(val(a.annee_demande) || "")),
+    ...allPayments.map(p => String(val(p.exerciceBudgetaire) || ""))
+  ].filter(Boolean))].sort((a,b)=>Number(a)-Number(b));
+
+  const funders = [...new Set(allApps.map(a => normalizedFunder(a)).filter(Boolean))].sort();
+
+  const stackedData = funders.map(funder => {
+    return {
+      label: funder,
+      data: years.map(y => {
+        return allApps
+          .filter(a => String(val(a.annee_demande) || "") === y && normalizedFunder(a) === funder)
+          .reduce((s,a) => s + (Number(val(a.montants?.accorde) || val(a.montants?.demande) || 0)), 0);
+      })
+    };
+  }).filter(ds => ds.data.some(v => v !== 0));
+
+  const paidByYear = {};
+  for(const p of allPayments){
+    const y = String(val(p.exerciceBudgetaire) || "");
+    if(!y) continue;
+    paidByYear[y] = (paidByYear[y] || 0) + (Number(val(p.amount)) || 0);
+  }
+
+  const byDevice = {};
+  for(const a of allApps){
+    const d = String(val(a.dispositif) || "Sans dispositif");
+    byDevice[d] = (byDevice[d] || 0) + (Number(val(a.montants?.accorde) || val(a.montants?.demande)) || 0);
+  }
+
+  const c1 = document.getElementById("chartStacked");
+  const c2 = document.getElementById("chartPaid");
+  const c3 = document.getElementById("chartDevice");
+  if(!c1 || !c2 || !c3) return;
+
+  state.charts.push(new Chart(c1, {
+    type: "bar",
+    data: {
+      labels: years,
+      datasets: stackedData
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: "bottom" }
+      },
+      scales: {
+        x: { stacked: true },
+        y: { stacked: true }
+      }
+    }
+  }));
+
+  state.charts.push(new Chart(c2, {
+    type: "bar",
+    data: {
+      labels: Object.keys(paidByYear).sort((a,b)=>Number(a)-Number(b)),
+      datasets: [{ label: "Versé", data: Object.keys(paidByYear).sort((a,b)=>Number(a)-Number(b)).map(k => paidByYear[k]) }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false }
+      }
+    }
+  }));
+
+  const deviceLabels = Object.keys(byDevice).sort((a,b)=>byDevice[b]-byDevice[a]).slice(0,10);
+  state.charts.push(new Chart(c3, {
+    type: "doughnut",
+    data: {
+      labels: deviceLabels,
+      datasets: [{ data: deviceLabels.map(k => byDevice[k]) }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: "bottom" }
+      }
+    }
+  }));
+}
+
+function render(){
+  const content = document.getElementById("content");
+  let html = "";
+
+  if(state.tab === "summary") html = renderSummary();
+  if(state.tab === "timeline") html = renderTimeline();
+  if(state.tab === "apps") html = renderApps();
+  if(state.tab === "payments") html = renderPayments();
+  if(state.tab === "analytics") html = renderAnalytics();
+  if(state.tab === "raw") html = renderRaw();
+
+  content.innerHTML = html;
+
+  if(state.tab === "summary"){
+    setTimeout(buildCharts, 50);
+  } else {
+    destroyCharts();
+  }
+}
+
+function initTabs(){
+  document.querySelectorAll(".tab").forEach(t => {
+    t.onclick = () => {
+      document.querySelectorAll(".tab").forEach(x => x.classList.remove("active"));
+      t.classList.add("active");
+      state.tab = t.dataset.tab;
+      render();
+    };
+  });
+}
+
+grist.ready();
+
+grist.onRecord(record => {
+  state.record = record || null;
+  state.grants = parse(record?.ds_assos_grants);
+  state.apps = getApps(state.grants);
+  state.payments = getPayments(state.grants);
+  buildFilters();
+  render();
+});
+
+initTabs();
+</script>
+</body>
+</html>
